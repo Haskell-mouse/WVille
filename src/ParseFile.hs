@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module ParseFile where 
+module ParseFile(parseFile) where 
 
 import Data.Attoparsec.Text as A
 import qualified Data.Text as T
@@ -10,7 +10,7 @@ import qualified Control.Applicative as CA
 -- | Parse heads of columns. 
 
 parseHead :: Parser [T.Text]
-parseHead = manyTill (T.pack <$> (many1 (notChar ' ') <* char ' ')) (string "\n" CA.<|> string "\r\n")
+parseHead = manyTill (T.pack <$> (many1 (notChar ' ') <* CA.many (char ' '))) (string "\n" CA.<|> string "\r\n")
 
 -- | Parse columns of data. 
 

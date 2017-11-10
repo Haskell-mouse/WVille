@@ -5,13 +5,14 @@ version:             0.1.0.0
 homepage:            https://github.com/githubuser/WVille#readme
 license:             BSD3
 license-file:        LICENSE
-author:              Author name here
-maintainer:          example@example.com
-copyright:           2017 Author name here
-category:            Web
+author:              Rinat Stryungis
+maintainer:          lazybonesxp@gmail.com
+copyright:           2017 Rinat Stryungis
+category:            time-frequency, parallelism
 build-type:          Simple
 extra-source-files:  README.md
-cabal-version:       >=1.10
+Cabal-version:       >= 1.6
+Tested-with:         GHC >= 8.0.1
 
 Flag llvm-ptx
   Description:          Use LLVM.PTX backend
@@ -47,16 +48,7 @@ executable WVille
                          attoparsec
   if flag(llvm-cpu)
     cpp-options:        -DACCELERATE_LLVM_NATIVE_BACKEND
-    build-depends:       base >= 4.7 && < 5, 
-                         directory, 
-                         accelerate >= 1.2.0.0,
-                         WVille, 
-                         accelerate-io, 
-                         text, 
-                         double-conversion, 
-                         vector, 
-                         wigner-ville-accelerate >= 0.1.0.3, 
-                         attoparsec
+    build-depends:       accelerate-llvm-native >= 1.2.0.0
   if flag(llvm-ptx)
     cpp-options:        -DACCELERATE_LLVM_PTX_BACKEND
     build-depends:  

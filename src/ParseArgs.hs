@@ -8,8 +8,6 @@ import Data.Array.Accelerate.Math.WindowFunc
 import Data.Text as T
 import Options.Applicative as O
 import Data.Semigroup ((<>))
-import Data.Data
-import Data.Typeable
 default (T.Text)
 
 data WVMode = WV | PWV | SPWV 
@@ -26,7 +24,7 @@ opts = execParser optI
 -- | Parse function . Combine parser for cmd args with info about program. 
 
 optI :: ParserInfo Opts
-optI = info ((optWV <|> optPWV) <**> helper) ( header "Calculate Wigner-Ville transform.")
+optI = info ((optWV <|> optPWV) <**> helper) ( header "Make Wigner-Ville transform to all columns in all files in a given path")
 
 -- | Parse function for cmd args. It just combine parsers for each option. 
 
@@ -74,14 +72,14 @@ gpu_cpu :: O.Parser CalcDev
 gpu_cpu = flag CPU GPU
   (   long "gpu"  
    <> short 'G'
-   <> help "Set GPU as main calculation device."
+   <> help "Set GPU as main calculation device. Program should be compiled with llvm-PTX backend support."
   ) 
 
 twindow :: O.Parser Int
 twindow = option auto
   (   long "twindow"
    <> short 'T'
-   <> metavar "Legth"
+   <> metavar "length"
    <> showDefault
    <> value 1025
    <> help "Length of frequency smoothing window in time domain."
@@ -94,7 +92,7 @@ winfunc = option auto
    <> metavar "WinFunc"
    <> showDefault
    <> value Rect
-   <> help "Select window function."
+   <> help "Select window function. Currently supporrted : Rect, Sin, Lanczos, Hanning, Hamming, Bartlett "
   )
 
 no_subtract_avg :: O.Parser NoSubAVG
@@ -103,8 +101,3 @@ no_subtract_avg = switch
    <> short 'N'
    <> help "If enabled, then dont subtract average value from all elemets of column before Hilbert transform."
   )
-
-{-
-  func_compl :: [String]
-  func_compl = 
-    let a = R -}
