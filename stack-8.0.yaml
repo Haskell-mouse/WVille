@@ -39,7 +39,7 @@ packages:
 - .
 - location:
     git: https://github.com/Haskell-mouse/wigner-ville-accelerate.git
-    commit: 509c0afd895c80e253767190610fa77204a0c8bc
+    commit: 430e4d00bf2d6d95be6acb5197995d67fb46cc20
   extra-dep: true
 
 - location: 

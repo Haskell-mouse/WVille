@@ -2,7 +2,7 @@
 
 -- | Module with parsers for command line arguments and cmd help.
 
-module ParseArgs(WVMode(..), opts, Opts(..), CalcDev(..)) where
+module ParseArgs(QTFD_type(..), opts, Opts(..), CalcDev(..)) where
 
 import Data.Array.Accelerate.Math.WindowFunc
 import Data.Text as T
@@ -10,38 +10,58 @@ import Options.Applicative as O
 import Data.Semigroup ((<>))
 default (T.Text)
 
-data WVMode = WV | PWV | SPWV 
+data QTFD_type = WV | PWV | SPWV | CW | CWW
 type NoSubAVG = Bool 
-data Opts = OptsWV FilePath CalcDev NoSubAVG | OptsPWV FilePath CalcDev Int WindowFunc NoSubAVG | OptsSPWV FilePath CalcDev Int WindowFunc Int WindowFunc NoSubAVG
+data Opts = OptsWV {getPath::FilePath, getDev :: CalcDev, subAVGflag :: NoSubAVG} | 
+            OptsPWV {getPath::FilePath, getDev::CalcDev,getWLength::Int, getWFunc::WindowFunc, subAVGflag::NoSubAVG} | 
+            OptsSPWV {getPath::FilePath, getDev::CalcDev, getWFLength::Int, getWFFunc::WindowFunc, getWTLength::Int, getWTFunc::WindowFunc, subAVGflag::NoSubAVG } | 
+            OptsCW {getPath::FilePath, getDev::CalcDev, getQ::Double,subAVGflag :: NoSubAVG} | 
+            OptsCWW {getPath::FilePath, getDev::CalcDev, getWLength::Int, getWFunc::WindowFunc, getQ::Double, subAVGflag :: NoSubAVG}
 data CalcDev = CPU | GPU
 
 -- | This function uses execParser function to do all work with catching cmd arguments
 -- and parse it with parser that has been created by combine of simple parsers. 
 
 opts :: IO Opts
-opts = execParser optI
+opts = execParser $ info (optU <**> helper) (header "Make QTFD transform to all columns in all files in a given path")
 
--- | Parse function . Combine parser for cmd args with info about program. 
+-- | Parse function for cmd args. It just makes commands and combine it with helper. 
 
-optI :: ParserInfo Opts
-optI = info ((optWV <|> optPWV) <**> helper) ( header "Make Wigner-Ville transform to all columns in all files in a given path")
-
--- | Parse function for cmd args. It just combine parsers for each option. 
+optU :: Parser Opts
+optU = subparser (command "WV" $ info (optWV <**> helper) (progDesc "Make Wigner-Ville transform")) 
+       <|> subparser (command "PWV" $ info (optPWV <**> helper) (progDesc "Make Pseudo Wigner-Ville transform")) 
+       <|> subparser (command "CW" $ info (optCW <**> helper) (progDesc "Make Choi-Williams transform"))
+       <|> subparser (command "CWW" $ info (optCWW <**> helper) (progDesc "Make windowed Choi-Willaims transform"))  
 
 optWV :: O.Parser Opts
-optWV = OptsWV 
+optWV = (OptsWV
   <$> dataPath
   <*> gpu_cpu
-  <*> no_subtract_avg
+  <*> no_subtract_avg)
 
 optPWV :: O.Parser Opts  
-optPWV = pseudo 
-   *> (OptsPWV
+optPWV = (OptsPWV 
   <$> dataPath
   <*> gpu_cpu
   <*> twindow
   <*> winfunc
-  <*> no_subtract_avg )
+  <*> no_subtract_avg)
+
+optCW :: O.Parser Opts 
+optCW = OptsCW
+ <$> dataPath
+ <*> gpu_cpu
+ <*> sigma
+ <*> no_subtract_avg
+
+optCWW :: O.Parser Opts  
+optCWW = OptsCWW 
+  <$> dataPath
+  <*> gpu_cpu
+  <*> twindow
+  <*> winfunc
+  <*> sigma
+  <*> no_subtract_avg
 
 dataPath :: O.Parser FilePath
 dataPath = strOption
@@ -51,22 +71,6 @@ dataPath = strOption
   <> help "Path with files for Wigner-Ville distribution."
  )
 
-
--- | Flag to check if we should clean FW rules before testing. 
-
-pseudo :: O.Parser WVMode
-pseudo = flag WV PWV
-  (   long "pseudo"  
-   <> short 'P'
-   <> help "Make peudo Wigner-Ville distribution. You shoud add window leng(it must be odd !) and window function."
-  )
-
-smooth_pseudo :: O.Parser WVMode
-smooth_pseudo = flag WV SPWV
-  (   long "smoothed-pseudo"
-   <> short 'S'
-   <> help "Make smoothed peudo Wigner-Ville distribution. You shoud add window leng(Odd) and window function. Currenly is not implemented."
-  )
 
 gpu_cpu :: O.Parser CalcDev
 gpu_cpu = flag CPU GPU
@@ -100,4 +104,13 @@ no_subtract_avg = switch
   (   long "no-subtract-average"
    <> short 'N'
    <> help "If enabled, then dont subtract average value from all elemets of column before Hilbert transform."
+  )
+
+sigma :: O.Parser Double
+sigma = option auto
+  (   long "sigma"
+   <> short 'S'
+   <> showDefault
+   <> value 1
+   <> help "Sigma constant for Choi-Williams distribution"
   )

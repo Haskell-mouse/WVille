@@ -7,7 +7,7 @@ module Main where
 
 import ParseArgs
 import ParseFile
-import Data.Array.Accelerate.Math.Wigner
+import Data.Array.Accelerate.Math.Qtfd
 import Data.Array.Accelerate.Math.Hilbert
 import Data.Array.Accelerate.Math.WindowFunc
 import Data.Attoparsec.Text
@@ -35,9 +35,7 @@ import qualified Data.Vector as V
 main :: IO ()
 main = do
   args <- opts
-  case args of 
-       (OptsWV _ _ _) -> makeWVall args
-       (OptsPWV _ _ _ _ _) -> makePWVall args
+  makeQTFDAll args
 
 -- | Transform data to text(using double conversion. It is much faster) and write it to file. 
 
@@ -58,17 +56,61 @@ writeData file (x:xs) w n = do
 
 -- | make Pseudo Wigner-Ville transform to all files in a directory. 
 
-makePWVall :: Opts -> IO ()
-makePWVall (OptsPWV path dev wlen wfun nosAVGflag) = do
-  if (even wlen)
-  then error "Window length maust be odd !!"
-  else do  
-    files <- listDirectory path
-    setCurrentDirectory path 
-    let fFiles = filter (isSuffixOf ".txt") files
-    let window = makeWindow wfun (A.unit $ A.constant wlen) :: A.Acc (A.Array A.DIM1 Double)
-        sAVGflag = A.constant $ not nosAVGflag
-    mapM_ (makePWV dev window sAVGflag) fFiles
+makeQTFDAll :: Opts -> IO ()
+makeQTFDAll opts = do 
+  let path = getPath opts
+      nosAVGflag = subAVGflag opts
+  files <- listDirectory path
+  setCurrentDirectory path 
+  let fFiles = filter (isSuffixOf ".txt") files
+      sAVGflag = A.constant $ not nosAVGflag
+  case opts of 
+    (OptsPWV _ dev wlen wfun _) -> 
+      do 
+        if (even wlen)
+        then error "Window length maust be odd !"
+        else 
+          do 
+            let window = makeWindow wfun (A.unit $ A.constant wlen) :: A.Acc (A.Array A.DIM1 Double)
+            mapM_ (makePWV dev window sAVGflag) fFiles
+    (OptsWV path dev nosAVGflag) -> mapM_ (makeWV dev sAVGflag) fFiles
+    (OptsCW path dev sigma nosAVGflag) -> mapM_ (makeCW dev sAVGflag sigma) fFiles
+    (OptsCWW path dev wlen wfun sigma nosAVGflag) -> 
+      do 
+        if (even wlen)
+        then error "Window length maust be odd !"
+        else 
+          do 
+            let window = makeWindow wfun (A.unit $ A.constant wlen) :: A.Acc (A.Array A.DIM1 Double)
+            mapM_ (makeCWW dev window sAVGflag sigma) fFiles
+  return ()
+
+makeCW :: CalcDev        -- ^ Calculation device - CPU or GPU 
+  -> A.Exp Bool  -- ^ Apply subtraction of the mean value from all elements in a column. 
+  -> Double       -- ^ sigma
+  -> FilePath    -- ^ Name of file with data.
+  -> IO ()
+makeCW dev sAVGflag sigma file = do
+  putStrLn $ "processing " ++ file ++ "..."
+  text <- TI.readFile file
+  let parseRes = parseOnly parseFile text
+  case parseRes of 
+    (Left errStr) -> error $ errStr
+    (Right dataF) -> mapM_ (startCW dev file sAVGflag sigma) dataF
+
+makeCWW :: CalcDev                   -- ^ Calculation device - CPU or GPU
+  -> A.Acc (A.Array A.DIM1 Double)   -- ^ Smoothing window in time-domain. Length must be odd.
+  -> A.Exp Bool                      -- ^ Apply subtraction of the mean value from all elements in a column. 
+  -> Double                          -- ^ Sigma parameter 
+  -> FilePath                        -- ^ Name of file with data.
+  -> IO ()
+makeCWW dev window sAVGflag sigma file = do 
+  putStrLn $ "processing " ++ file ++ "..."
+  text <- TI.readFile file 
+  let parseRes = parseOnly parseFile text 
+  case parseRes of 
+    (Left errStr) -> error $ errStr 
+    (Right dataF) -> mapM_ (startCWW dev window file sAVGflag sigma) dataF 
 
 -- | Make Pseudo Wigner-Ville transform to all columns in the given file
 
@@ -103,30 +145,21 @@ startPWV dev window oldName sAVGflag (column_name,dataF) = do
   putStr $ "   Creating file " ++ newFName ++ " ..."
   let leng = length dataF
       pData = A.fromList (A.Z A.:. leng) dataF
+      appPWV = (pWignerVille window) . hilbert . supAVG sAVGflag
       processed = case dev of
 #ifdef ACCELERATE_LLVM_NATIVE_BACKEND
-                    CPU -> ALN.run1 ((pWignerVille window) . hilbert . supAVG sAVGflag) pData
+                    CPU -> ALN.run1 appPWV pData
 #endif
 #ifdef ACCELERATE_LLVM_PTX_BACKEND
-                    GPU -> ALP.run1 ((pWignerVille window) . hilbert . supAVG sAVGflag) pData
+                    GPU -> ALP.run1 appPWV pData
 #endif
-                    CPU -> ALI.run1 ((pWignerVille window) . hilbert . supAVG sAVGflag) pData
+                    CPU -> ALI.run1 appPWV pData
                     GPU -> error "Compiled without GPU support"
       pList = S.toList $! processed
   file <- openFile newFName WriteMode
   onException (writeData file pList leng 1) (removeFile newFName)
   hClose file
   putStrLn "Done !"
-
--- | make Wigner-Ville transform to all files in a directory. 
-
-makeWVall :: Opts -> IO ()
-makeWVall (OptsWV path dev nosAVGflag) = do 
-  files <- listDirectory path
-  setCurrentDirectory path 
-  let fFiles = filter (isSuffixOf ".txt") files
-      sAVGflag = A.constant $ not nosAVGflag
-  mapM_ (makeWV dev sAVGflag) fFiles
 
 -- | Make Wigner-Ville transform to all columns in the given file       
 
@@ -158,16 +191,74 @@ startWV dev oldName sAVGflag (column_name,dataF) = do
   putStr $ "   Creating file " ++ newFName ++ " ..."
   let leng = length dataF
       pData = A.fromList (A.Z A.:. leng) dataF
+      appWV = wignerVille . hilbert . supAVG sAVGflag
       processed = case dev of 
 #ifdef ACCELERATE_LLVM_NATIVE_BACKEND
-                    CPU -> ALN.run1 (wignerVille . hilbert . supAVG sAVGflag) pData
+                    CPU -> ALN.run1 appWV pData
 #endif
 #ifdef ACCELERATE_LLVM_PTX_BACKEND
-                    GPU -> ALP.run1 (wignerVille . hilbert . supAVG sAVGflag) pData
+                    GPU -> ALP.run1 appWV pData
 #endif
-                    CPU -> ALI.run1 (wignerVille . hilbert . supAVG sAVGflag) pData
+                    CPU -> ALI.run1 appWV pData
                     GPU -> error "Compiled without GPU support"
       pList = S.toList $  processed
+  file <- openFile newFName WriteMode
+  onException (writeData file pList leng 1) (removeFile newFName)
+  hClose file
+  putStrLn "Done !"
+
+startCW :: 
+  CalcDev                 -- ^ Calculation device - CPU or GPU 
+  -> FilePath             -- ^ Name of file with data.
+  -> A.Exp Bool           -- ^ Apply subtraction of the mean value from all elements in a column.
+  -> Double               -- ^ Sigma
+  -> (T.Text,[Double])    -- ^ Name of column and parsed data from column
+  -> IO ()
+startCW dev oldName sAVGflag sigma (column_name,dataF) = do 
+  let newFName = oldName ++ "-" ++ T.unpack column_name ++ ".txt"
+  putStr $ "   Creating file " ++ newFName ++ " ..."
+  let leng = length dataF
+      pData = A.fromList (A.Z A.:. leng) dataF
+      appCW = ((flip choiWilliams) (A.constant sigma)) . hilbert . supAVG sAVGflag
+      processed = case dev of 
+#ifdef ACCELERATE_LLVM_NATIVE_BACKEND
+                    CPU -> ALN.run1 appCW pData
+#endif
+#ifdef ACCELERATE_LLVM_PTX_BACKEND
+                    GPU -> ALP.run1 appCW pData
+#endif
+                    CPU -> ALI.run1 appCW pData
+                    GPU -> error "Compiled without GPU support"
+      pList = S.toList $  processed
+  file <- openFile newFName WriteMode
+  onException (writeData file pList leng 1) (removeFile newFName)
+  hClose file
+  putStrLn "Done !"
+
+startCWW :: 
+  CalcDev                          -- ^ Calculation device - CPU or GPU 
+  -> A.Acc (A.Array A.DIM1 Double) -- ^ Smoothing window in time-domain. Length must be odd.
+  -> FilePath                      -- ^ Name of file with data.
+  -> A.Exp Bool                    -- ^ Apply subtraction of the mean value from all elements in a column. 
+  -> Double                        -- ^ Sigma
+  -> (T.Text,[Double])             -- ^ Name of column and parsed data from column
+  -> IO ()
+startCWW dev window oldName sAVGflag sigma (column_name,dataF) = do
+  let newFName = oldName ++ "-" ++ T.unpack column_name ++ ".txt"
+  putStr $ "   Creating file " ++ newFName ++ " ..."
+  let leng = length dataF
+      pData = A.fromList (A.Z A.:. leng) dataF
+      appCWW = (choiWilliams_w window (A.constant sigma)) . hilbert . supAVG sAVGflag
+      processed = case dev of
+#ifdef ACCELERATE_LLVM_NATIVE_BACKEND
+                    CPU -> ALN.run1 appCWW pData
+#endif
+#ifdef ACCELERATE_LLVM_PTX_BACKEND
+                    GPU -> ALP.run1 appCWW pData
+#endif
+                    CPU -> ALI.run1 appCWW pData
+                    GPU -> error "Compiled without GPU support"
+      pList = S.toList $! processed
   file <- openFile newFName WriteMode
   onException (writeData file pList leng 1) (removeFile newFName)
   hClose file
