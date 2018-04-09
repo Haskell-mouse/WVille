@@ -83,12 +83,21 @@ makeQTFDAll opts = do
           do 
             let window = makeWindow wfun (A.unit $ A.constant wlen) :: A.Acc (A.Array A.DIM1 Double)
             mapM_ (makeCWW dev window sAVGflag sigma) fFiles
+    (OptsBJ path dev nosAVGflag) -> mapM_ (makeBJ dev sAVGflag) fFiles
+    (OptsBJW path dev wlen wfun nosAVGflag) -> 
+      do 
+        if (even wlen)
+        then error "Window length maust be odd !"
+        else 
+          do 
+            let window = makeWindow wfun (A.unit $ A.constant wlen) :: A.Acc (A.Array A.DIM1 Double)
+            mapM_ (makeBJW dev window sAVGflag) fFiles    
   return ()
 
 makeCW :: CalcDev        -- ^ Calculation device - CPU or GPU 
-  -> A.Exp Bool  -- ^ Apply subtraction of the mean value from all elements in a column. 
-  -> Double       -- ^ sigma
-  -> FilePath    -- ^ Name of file with data.
+  -> A.Exp Bool          -- ^ Apply subtraction of the mean value from all elements in a column. 
+  -> Double              -- ^ sigma
+  -> FilePath            -- ^ Name of file with data.
   -> IO ()
 makeCW dev sAVGflag sigma file = do
   putStrLn $ "processing " ++ file ++ "..."
@@ -111,6 +120,32 @@ makeCWW dev window sAVGflag sigma file = do
   case parseRes of 
     (Left errStr) -> error $ errStr 
     (Right dataF) -> mapM_ (startCWW dev window file sAVGflag sigma) dataF 
+
+
+makeBJ :: CalcDev        -- ^ Calculation device - CPU or GPU 
+  -> A.Exp Bool          -- ^ Apply subtraction of the mean value from all elements in a column. 
+  -> FilePath            -- ^ Name of file with data.
+  -> IO ()
+makeBJ dev sAVGflag file = do
+  putStrLn $ "processing " ++ file ++ "..."
+  text <- TI.readFile file
+  let parseRes = parseOnly parseFile text
+  case parseRes of 
+    (Left errStr) -> error $ errStr
+    (Right dataF) -> mapM_ (startBJ dev file sAVGflag) dataF
+
+makeBJW :: CalcDev                   -- ^ Calculation device - CPU or GPU
+  -> A.Acc (A.Array A.DIM1 Double)   -- ^ Smoothing window in time-domain. Length must be odd.
+  -> A.Exp Bool                      -- ^ Apply subtraction of the mean value from all elements in a column. 
+  -> FilePath                        -- ^ Name of file with data.
+  -> IO ()
+makeBJW dev window sAVGflag file = do 
+  putStrLn $ "processing " ++ file ++ "..."
+  text <- TI.readFile file 
+  let parseRes = parseOnly parseFile text 
+  case parseRes of 
+    (Left errStr) -> error $ errStr 
+    (Right dataF) -> mapM_ (startBJW dev window file sAVGflag) dataF
 
 -- | Make Pseudo Wigner-Ville transform to all columns in the given file
 
@@ -235,6 +270,61 @@ startCW dev oldName sAVGflag sigma (column_name,dataF) = do
   hClose file
   putStrLn "Done !"
 
+startBJW :: 
+  CalcDev                          -- ^ Calculation device - CPU or GPU 
+  -> A.Acc (A.Array A.DIM1 Double) -- ^ Smoothing window in time-domain. Length must be odd.
+  -> FilePath                      -- ^ Name of file with data.
+  -> A.Exp Bool                    -- ^ Apply subtraction of the mean value from all elements in a column.
+  -> (T.Text,[Double])             -- ^ Name of column and parsed data from column
+  -> IO ()
+startBJW dev window oldName sAVGflag (column_name,dataF) = do
+  let newFName = oldName ++ "-" ++ T.unpack column_name ++ ".txt"
+  putStr $ "   Creating file " ++ newFName ++ " ..."
+  let leng = length dataF
+      pData = A.fromList (A.Z A.:. leng) dataF
+      appBJW = (bornJordan_m window) . hilbert . supAVG sAVGflag
+      processed = case dev of
+#ifdef ACCELERATE_LLVM_NATIVE_BACKEND
+                    CPU -> ALN.run1 appBJW pData
+#endif
+#ifdef ACCELERATE_LLVM_PTX_BACKEND
+                    GPU -> ALP.run1 appBJW pData
+#endif
+                    CPU -> ALI.run1 appBJW pData
+                    GPU -> error "Compiled without GPU support"
+      pList = S.toList $! processed
+  file <- openFile newFName WriteMode
+  onException (writeData file pList leng 1) (removeFile newFName)
+  hClose file
+  putStrLn "Done !"
+
+startBJ :: 
+  CalcDev                 -- ^ Calculation device - CPU or GPU 
+  -> FilePath             -- ^ Name of file with data.
+  -> A.Exp Bool           -- ^ Apply subtraction of the mean value from all elements in a column.
+  -> (T.Text,[Double])    -- ^ Name of column and parsed data from column
+  -> IO ()
+startBJ dev oldName sAVGflag (column_name,dataF) = do 
+  let newFName = oldName ++ "-" ++ T.unpack column_name ++ ".txt"
+  putStr $ "   Creating file " ++ newFName ++ " ..."
+  let leng = length dataF
+      pData = A.fromList (A.Z A.:. leng) dataF
+      appBJ = bornJordan . hilbert . supAVG sAVGflag
+      processed = case dev of 
+#ifdef ACCELERATE_LLVM_NATIVE_BACKEND
+                    CPU -> ALN.run1 appBJ pData
+#endif
+#ifdef ACCELERATE_LLVM_PTX_BACKEND
+                    GPU -> ALP.run1 appBJ pData
+#endif
+                    CPU -> ALI.run1 appBJ pData
+                    GPU -> error "Compiled without GPU support"
+      pList = S.toList $  processed
+  file <- openFile newFName WriteMode
+  onException (writeData file pList leng 1) (removeFile newFName)
+  hClose file
+  putStrLn "Done !"
+
 startCWW :: 
   CalcDev                          -- ^ Calculation device - CPU or GPU 
   -> A.Acc (A.Array A.DIM1 Double) -- ^ Smoothing window in time-domain. Length must be odd.
@@ -263,6 +353,7 @@ startCWW dev window oldName sAVGflag sigma (column_name,dataF) = do
   onException (writeData file pList leng 1) (removeFile newFName)
   hClose file
   putStrLn "Done !"
+
 
 -- | Subtraction of average value from all elements of column
 

@@ -10,11 +10,13 @@ import Options.Applicative as O
 import Data.Semigroup ((<>))
 default (T.Text)
 
-data QTFD_type = WV | PWV | SPWV | CW | CWW
+data QTFD_type = WV | PWV | SPWV | CW | CWW | BJ | BJW 
 type NoSubAVG = Bool 
 data Opts = OptsWV {getPath::FilePath, getDev :: CalcDev, subAVGflag :: NoSubAVG} | 
             OptsPWV {getPath::FilePath, getDev::CalcDev,getWLength::Int, getWFunc::WindowFunc, subAVGflag::NoSubAVG} | 
             OptsSPWV {getPath::FilePath, getDev::CalcDev, getWFLength::Int, getWFFunc::WindowFunc, getWTLength::Int, getWTFunc::WindowFunc, subAVGflag::NoSubAVG } | 
+            OptsBJ {getPath::FilePath, getDev::CalcDev,subAVGflag :: NoSubAVG} | 
+            OptsBJW {getPath::FilePath, getDev::CalcDev, getWLength::Int, getWFunc::WindowFunc, subAVGflag :: NoSubAVG} |
             OptsCW {getPath::FilePath, getDev::CalcDev, getQ::Double,subAVGflag :: NoSubAVG} | 
             OptsCWW {getPath::FilePath, getDev::CalcDev, getWLength::Int, getWFunc::WindowFunc, getQ::Double, subAVGflag :: NoSubAVG}
 data CalcDev = CPU | GPU
@@ -31,7 +33,9 @@ optU :: Parser Opts
 optU = subparser (command "WV" $ info (optWV <**> helper) (progDesc "Make Wigner-Ville transform")) 
        <|> subparser (command "PWV" $ info (optPWV <**> helper) (progDesc "Make Pseudo Wigner-Ville transform")) 
        <|> subparser (command "CW" $ info (optCW <**> helper) (progDesc "Make Choi-Williams transform"))
-       <|> subparser (command "CWW" $ info (optCWW <**> helper) (progDesc "Make windowed Choi-Willaims transform"))  
+       <|> subparser (command "CWW" $ info (optCWW <**> helper) (progDesc "Make windowed Choi-Willaims transform"))
+       <|> subparser (command "BJ" $ info (optBJ <**> helper) (progDesc "Make Born-Jordan transform"))
+       <|> subparser (command "BJW" $ info (optBJW <**> helper) (progDesc "Make windowed Born-Jordan transform"))
 
 optWV :: O.Parser Opts
 optWV = (OptsWV
@@ -61,6 +65,20 @@ optCWW = OptsCWW
   <*> twindow
   <*> winfunc
   <*> sigma
+  <*> no_subtract_avg
+
+optBJ :: O.Parser Opts 
+optBJ = OptsBJ
+ <$> dataPath
+ <*> gpu_cpu
+ <*> no_subtract_avg
+
+optBJW :: O.Parser Opts  
+optBJW = OptsBJW 
+  <$> dataPath
+  <*> gpu_cpu
+  <*> twindow
+  <*> winfunc
   <*> no_subtract_avg
 
 dataPath :: O.Parser FilePath
