@@ -35,11 +35,12 @@ library
 executable WVille
   hs-source-dirs:      app
   main-is:             Main.hs
-  ghc-options:         -O2 -Wall -threaded -rtsopts -with-rtsopts=-N
+  ghc-options:         -O2 -Wall -threaded -rtsopts -with-rtsopts=-N 
   build-depends:         base >= 4.7 && < 5, 
                          directory, 
                          accelerate >= 1.2.0.0, 
-                         accelerate-io, 
+                         bytestring, 
+                         gamma,
                          text, 
                          double-conversion, 
                          vector, 
