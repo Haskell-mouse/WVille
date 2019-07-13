@@ -105,12 +105,15 @@ makeQTFDAll opts = do
               nWindowArray = makeWindow nWindowFunc (A.unit $ A.constant nWindow) :: A.Acc (A.Array A.DIM1 Float)
               bothRectangular = uWindowFunc == Rect && nWindowFunc == Rect
           in mapM_ (makeBJ dev sAVGflag alpha uWindowArray nWindowArray bothRectangular) fFiles
-    (OptsEMBD path dev alpha beta uWindow nWindow nosAVGflag) ->
+    (OptsEMBD path dev alpha beta uWindow uWindowFunc nWindow nWindowFunc normalise nosAVGflag) ->
       do
         if (even uWindow || even nWindow)
         then error "Window length maust be odd !"
         else let gammas = makeGammaArray beta uWindow
-             in mapM_ (makeEMBD dev alpha gammas sAVGflag uWindow nWindow) fFiles
+                 uWindowArray = makeWindow uWindowFunc (A.unit $ A.constant uWindow) :: A.Acc (A.Array A.DIM1 Float)
+                 nWindowArray = makeWindow nWindowFunc (A.unit $ A.constant nWindow) :: A.Acc (A.Array A.DIM1 Float)
+                 bothRectangular = uWindowFunc == Rect && nWindowFunc == Rect
+             in mapM_ (makeEMBD dev sAVGflag alpha gammas uWindowArray nWindowArray bothRectangular normalise) fFiles
   return ()
 
 makeCW :: CalcDev                   -- ^ Calculation device - CPU or GPU
@@ -162,23 +165,26 @@ makePWV dev window sAVGflag file = do
     (Left errStr) -> error $ errStr
     (Right dataF) -> mapM_ (startPWV dev window file sAVGflag) dataF
 
+--makeEMBD dev alpha gammas uWindowArray nWindowArray bothRectangular normalise 
 
-makeEMBD :: CalcDev        -- ^ Calculation device - CPU or GPU
-  -> Float              -- ^ alpha
-  -> [Float]
-  -> A.Exp Bool          -- ^ Apply subtraction of the mean value from all elements in a column.
-  -> Int
-  -> Int
-  -> FilePath            -- ^ Name of file with data.
+makeEMBD :: CalcDev                   -- ^ Calculation device - CPU or GPU
+  -> A.Exp Bool                     -- ^ Apply subtraction of the mean value from all elements in a column.
+  -> Float                          -- ^ alpha
+  -> [Float]                        -- ^ gammas 
+  -> A.Acc (A.Array A.DIM1 Float)   -- ^ Smoothing window in frequensy-domain. Length must be odd.
+  -> A.Acc (A.Array A.DIM1 Float)   -- ^ Smoothing window in time-domain. Length must be odd.
+  -> Bool                           -- ^ if the core array should be normalised
+  -> Bool                           -- ^ if Both windows are rectangular
+  -> FilePath                       -- ^ Name of file with data.
   -> IO ()
-makeEMBD dev alpha gammas sAVGflag uWindow nWindow file = undefined {- do
+makeEMBD dev sAVGflag alpha gammas uWindowArray nWindowArray normalise bothRect file = do
   putStrLn $ "processing " ++ file ++ "..."
   text <- TI.readFile file
   let parseRes = parseOnly parseFile text
   case parseRes of
     (Left errStr) -> error $ errStr
-    (Right dataF) -> mapM_ (startEMBD dev file sAVGflag alpha gammas uWindow nWindow) dataF
--}
+    (Right dataF) -> mapM_ (startEMBD dev file sAVGflag alpha gammas uWindowArray nWindowArray normalise bothRect) dataF
+
 -- | Make Pseudo Wigner-Ville transform to the given column.
 -- At first it makes subtraction of average value (if supAVGflag) and applies hilbert transform to make analytic signal. After that it applies Pseudo-Wigner transftorm
 -- and save data to file with
@@ -330,24 +336,28 @@ startBJ dev oldName sAVGflag alpha uWindowArray nWindowArray bothRect (column_na
   hClose file
   putStrLn "Done !"
 
-{-
 startEMBD ::
   CalcDev                 -- ^ Calculation device - CPU or GPU
   -> FilePath             -- ^ Name of file with data.
   -> A.Exp Bool           -- ^ Apply subtraction of the mean value from all elements in a column.
-  -> Float               -- ^ Alpha
-  -> [Float]
-  -> Int
-  -> Int
+  -> Float                -- ^ Alpha 
+  -> [Float]              -- ^ Gammas 
+  -> A.Acc (A.Array A.DIM1 Float)   -- ^ Smoothing window in frequensy-domain. Length must be odd.
+  -> A.Acc (A.Array A.DIM1 Float)   -- ^ Smoothing window in time-domain. Length must be odd.
+  -> Bool                           -- ^ if the core array should be normalised
+  -> Bool                           -- ^ if Both windows are rectangular
   -> (T.Text,[Float])    -- ^ Name of column and parsed data from column
   -> IO ()
-startEMBD dev oldName sAVGflag alpha gammas uWindow nWindow (column_name,dataF) = do
+startEMBD dev oldName sAVGflag alpha gammas uWindowArray nWindowArray normalise bothRect (column_name,dataF) = do
   let newFName = oldName ++ "-" ++ T.unpack column_name ++ ".txt"
   putStr $ "   Creating file " ++ newFName ++ " ..."
   let leng = length dataF
+      uWindow = A.length uWindowArray
+      nWindow = A.length nWindowArray
+      gammasArr = A.use $ A.fromList (A.Z A.:. (length gammas)) gammas 
+      mWindowArrays = if bothRect then Nothing else Just (uWindowArray,nWindowArray)
       pData = A.fromList (A.Z A.:. leng) dataF
-      aGammas = A.use $ A.fromList (A.Z A.:. (length gammas)) gammas
-      appEMBD = (modifiedB (A.constant alpha) aGammas (A.constant uWindow) (A.constant nWindow)) . hilbert . supAVG sAVGflag
+      appEMBD = (eModifiedB (A.constant alpha) gammasArr mWindowArrays uWindow nWindow normalise) . hilbert . supAVG sAVGflag
       processed = case dev of
 #ifdef ACCELERATE_LLVM_NATIVE_BACKEND
                     CPU -> ALN.run1 appEMBD pData
@@ -361,7 +371,7 @@ startEMBD dev oldName sAVGflag alpha gammas uWindow nWindow (column_name,dataF) 
   file <- openFile newFName WriteMode
   onException (writeData file pList leng 1) (removeFile newFName)
   hClose file
-  putStrLn "Done !" -}
+  putStrLn "Done !"
 
 
 -- | Subtraction of average value from all elements of column

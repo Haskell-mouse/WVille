@@ -85,10 +85,10 @@ extra-deps:
 flags: 
       WVille:
         llvm-cpu: true
-        llvm-ptx: true
+        llvm-ptx: false
       accelerate-fft:
         llvm-cpu: true
-        llvm-ptx: true
+        llvm-ptx: false
 # Extra package databases containing global packages
 extra-package-dbs: []
 

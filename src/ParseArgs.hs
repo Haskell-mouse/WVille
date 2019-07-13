@@ -19,7 +19,8 @@ data Opts = OptsWV {getPath::FilePath, getDev :: CalcDev, subAVGflag :: NoSubAVG
                      getUWinfFunc :: WindowFunc, getNWindow :: Int,getNWinFunc :: WindowFunc, subAVGflag :: NoSubAVG} |
             OptsCW {getPath::FilePath, getDev::CalcDev, getSigma::Float, getUWindow :: Int,
                      getUWinfFunc :: WindowFunc, getNWindow :: Int,getNWinFunc :: WindowFunc,getNormalised :: Bool, subAVGflag :: NoSubAVG} |
-            OptsEMBD {getPath::FilePath, getDev::CalcDev, getAlpha::Float, getBeta :: Float, getUWindow :: Int, getNWindow :: Int, subAVGflag :: NoSubAVG}
+            OptsEMBD {getPath::FilePath, getDev::CalcDev, getAlpha::Float, getBeta :: Float, getUWindow :: Int,getUWindowFunc :: WindowFunc, 
+                      getNWindow :: Int, getNWindowFunc :: WindowFunc ,getNormalised :: Bool, subAVGflag :: NoSubAVG}
 data CalcDev = CPU | GPU
 
 -- | This function uses execParser function to do all work with catching cmd arguments
@@ -70,7 +71,10 @@ optEMBD = OptsEMBD
  <*> alpha
  <*> beta
  <*> uWindow
+ <*> uWinfunc
  <*> nWindow
+ <*> nWinfunc
+ <*> normalise
  <*> no_subtract_avg
 
 optBJ :: O.Parser Opts
